@@ -6,3 +6,33 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model Transfer {
+  id          String   @id @default(cuid())
+  pickupCode  String   @unique @db.VarChar(6)
+  type        TransferType
+  textContent String?  @db.Text
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  files       File[]
+
+  @@index([pickupCode])
+}
+
+model File {
+  id         String   @id @default(cuid())
+  transferId String
+  transfer   Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  fileName   String
+  fileSize   Int
+  ossKey     String
+  ossUrl     String
+  createdAt  DateTime @default(now())
+
+  @@index([transferId])
+}
+
+enum TransferType {
+  FILE
+  TEXT
+}
