@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 
 type Tab = "file" | "text" | "pickup";
 
@@ -21,11 +22,91 @@ function formatSize(bytes: number) {
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
+interface AuthUser {
+  id: string;
+  phone: string;
+  role: string;
+  nickname: string | null;
+}
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("file");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Auth
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginPhone, setLoginPhone] = useState("");
+  const [loginCode, setLoginCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => { if (data.user) setUser(data.user); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const handleSendCode = async () => {
+    if (!loginPhone || !/^1[3-9]\d{9}$/.test(loginPhone)) {
+      setError("Please enter a valid phone number");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: loginPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCodeSent(true);
+      setCountdown(60);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to send code");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!loginCode) return;
+    setAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: loginPhone, code: loginCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUser(data.user);
+      setShowLogin(false);
+      setLoginPhone("");
+      setLoginCode("");
+      setCodeSent(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Login failed");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+  };
 
   // File upload
   const [files, setFiles] = useState<File[]>([]);
@@ -141,6 +222,79 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
+        {/* Auth Header */}
+        <div className="flex justify-end items-center gap-2 mb-4 text-sm">
+          {user ? (
+            <>
+              <span className="text-slate-500">{user.nickname || user.phone}</span>
+              <Link href="/my" className="text-blue-600 hover:underline">My Transfers</Link>
+              {user.role === "ADMIN" && (
+                <Link href="/admin" className="text-red-600 hover:underline">Admin</Link>
+              )}
+              <button onClick={handleLogout} className="text-slate-400 hover:text-slate-600">Logout</button>
+            </>
+          ) : (
+            <button
+              onClick={() => setShowLogin(true)}
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Login
+            </button>
+          )}
+        </div>
+
+        {/* Login Modal */}
+        {showLogin && !user && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Login with SMS</h2>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  value={loginPhone}
+                  onChange={(e) => setLoginPhone(e.target.value)}
+                  placeholder="Phone number"
+                  maxLength={11}
+                  className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleSendCode}
+                  disabled={authLoading || countdown > 0}
+                  className="px-4 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  {countdown > 0 ? `${countdown}s` : "Send Code"}
+                </button>
+              </div>
+              {codeSent && (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={loginCode}
+                    onChange={(e) => setLoginCode(e.target.value)}
+                    placeholder="Verification code"
+                    maxLength={6}
+                    className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-center tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  />
+                  <button
+                    onClick={handleLogin}
+                    disabled={authLoading || !loginCode}
+                    className="px-6 py-2.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    {authLoading ? "..." : "Login"}
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => { setShowLogin(false); setCodeSent(false); setLoginPhone(""); setLoginCode(""); }}
+                className="text-xs text-slate-400 hover:text-slate-600"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         <h1 className="text-3xl font-bold text-center text-slate-800 mb-2">FileTransfer</h1>
         <p className="text-center text-slate-500 mb-8">Upload files or text, get a pickup code to share</p>
 
