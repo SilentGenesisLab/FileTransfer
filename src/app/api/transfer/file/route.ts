@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOSSClient, generateOSSKey } from "@/lib/oss";
 import { generatePickupCode } from "@/lib/pickup-code";
+import { getCurrentUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,11 +52,14 @@ export async function POST(request: NextRequest) {
       pickupCode = generatePickupCode();
     }
 
+    const user = await getCurrentUser().catch(() => null);
+
     const transfer = await prisma.transfer.create({
       data: {
         pickupCode,
         type: "FILE",
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        userId: user?.id ?? null,
         files: {
           create: uploadedFiles,
         },
