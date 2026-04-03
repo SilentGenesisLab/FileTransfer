@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id          String   @id @default(cuid())
+  phone       String   @unique @db.VarChar(20)
+  role        UserRole @default(USER)
+  nickname    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastLoginAt DateTime?
+  transfers   Transfer[]
+}
+
 model Transfer {
   id          String   @id @default(cuid())
   pickupCode  String   @unique @db.VarChar(6)
@@ -14,9 +25,12 @@ model Transfer {
   textContent String?  @db.Text
   expiresAt   DateTime
   createdAt   DateTime @default(now())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
   files       File[]
 
   @@index([pickupCode])
+  @@index([userId])
 }
 
 model File {
@@ -35,4 +49,9 @@ model File {
 enum TransferType {
   FILE
   TEXT
+}
+
+enum UserRole {
+  ADMIN
+  USER
 }
