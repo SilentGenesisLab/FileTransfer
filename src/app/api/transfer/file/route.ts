@@ -5,6 +5,13 @@ import { generatePickupCode } from "@/lib/pickup-code";
 
 export async function POST(request: NextRequest) {
   try {
+    if (!process.env.OSS_ACCESS_KEY_ID || !process.env.OSS_ACCESS_KEY_SECRET) {
+      return NextResponse.json(
+        { error: "File upload is not available: OSS credentials not configured" },
+        { status: 503 },
+      );
+    }
+
     const formData = await request.formData();
     const files = formData.getAll("files") as File[];
 
