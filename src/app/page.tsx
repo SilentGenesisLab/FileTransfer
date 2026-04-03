@@ -22,9 +22,12 @@ function formatSize(bytes: number) {
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
+type AuthTab = "account" | "phone" | "register";
+
 interface AuthUser {
   id: string;
   phone: string;
+  username?: string | null;
   role: string;
   nickname: string | null;
 }
@@ -38,11 +41,23 @@ export default function Home() {
   // Auth
   const [user, setUser] = useState<AuthUser | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [authTab, setAuthTab] = useState<AuthTab>("account");
   const [loginPhone, setLoginPhone] = useState("");
   const [loginCode, setLoginCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [authLoading, setAuthLoading] = useState(false);
+  // Account login
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  // Register
+  const [regUsername, setRegUsername] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regConfirm, setRegConfirm] = useState("");
+  const [regPhone, setRegPhone] = useState("");
+  const [regCode, setRegCode] = useState("");
+  const [regCodeSent, setRegCodeSent] = useState(false);
+  const [regCountdown, setRegCountdown] = useState(0);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -57,9 +72,104 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [countdown]);
 
+  useEffect(() => {
+    if (regCountdown <= 0) return;
+    const timer = setTimeout(() => setRegCountdown(regCountdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [regCountdown]);
+
+  // Account login handler
+  const handleAccountLogin = async () => {
+    if (!loginUsername || !loginPassword) return;
+    setAuthLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUser(data.user);
+      setShowLogin(false);
+      setLoginUsername("");
+      setLoginPassword("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "登录失败");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Register handler
+  const handleRegister = async () => {
+    if (!regUsername || !regPassword || !regPhone || !regCode) return;
+    if (regPassword !== regConfirm) {
+      setError("两次密码输入不一致");
+      return;
+    }
+    if (regPassword.length < 6) {
+      setError("密码至少6个字符");
+      return;
+    }
+    setAuthLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: regUsername,
+          password: regPassword,
+          phone: regPhone,
+          code: regCode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setUser(data.user);
+      setShowLogin(false);
+      setRegUsername("");
+      setRegPassword("");
+      setRegConfirm("");
+      setRegPhone("");
+      setRegCode("");
+      setRegCodeSent(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "注册失败");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Send code for registration
+  const handleRegSendCode = async () => {
+    if (!regPhone || !/^1[3-9]\d{9}$/.test(regPhone)) {
+      setError("请输入正确的手机号");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: regPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setRegCodeSent(true);
+      setRegCountdown(60);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "发送验证码失败");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleSendCode = async () => {
     if (!loginPhone || !/^1[3-9]\d{9}$/.test(loginPhone)) {
-      setError("Please enter a valid phone number");
+      setError("请输入正确的手机号");
       return;
     }
     setAuthLoading(true);
@@ -90,14 +200,21 @@ export default function Home() {
         body: JSON.stringify({ phone: loginPhone, code: loginCode }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (data.needRegister) {
+          setAuthTab("register");
+          setRegPhone(loginPhone);
+          throw new Error(data.error);
+        }
+        throw new Error(data.error);
+      }
       setUser(data.user);
       setShowLogin(false);
       setLoginPhone("");
       setLoginCode("");
       setCodeSent(false);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Login failed");
+      setError(e instanceof Error ? e.message : "登录失败");
     } finally {
       setAuthLoading(false);
     }
@@ -238,60 +355,176 @@ export default function Home() {
               onClick={() => setShowLogin(true)}
               className="text-blue-600 hover:text-blue-700 font-medium"
             >
-              Login
+              登录 / 注册
             </button>
           )}
         </div>
 
-        {/* Login Modal */}
+        {/* Auth Modal */}
         {showLogin && !user && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">Login with SMS</h2>
-            <div className="space-y-3">
-              <div className="flex gap-2">
+            {/* Auth Tabs */}
+            <div className="flex bg-slate-100 rounded-lg p-1 mb-4">
+              {([
+                { key: "account" as AuthTab, label: "账号登录" },
+                { key: "phone" as AuthTab, label: "手机登录" },
+                { key: "register" as AuthTab, label: "注册" },
+              ]).map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => { setAuthTab(t.key); setError(null); }}
+                  className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
+                    authTab === t.key
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Account Login */}
+            {authTab === "account" && (
+              <div className="space-y-3">
                 <input
-                  type="tel"
-                  value={loginPhone}
-                  onChange={(e) => setLoginPhone(e.target.value)}
-                  placeholder="Phone number"
-                  maxLength={11}
-                  className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="用户名"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => e.key === "Enter" && handleAccountLogin()}
+                />
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="密码"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => e.key === "Enter" && handleAccountLogin()}
                 />
                 <button
-                  onClick={handleSendCode}
-                  disabled={authLoading || countdown > 0}
-                  className="px-4 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  onClick={handleAccountLogin}
+                  disabled={authLoading || !loginUsername || !loginPassword}
+                  className="w-full py-2.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {countdown > 0 ? `${countdown}s` : "Send Code"}
+                  {authLoading ? "登录中..." : "登录"}
                 </button>
               </div>
-              {codeSent && (
+            )}
+
+            {/* Phone Login */}
+            {authTab === "phone" && (
+              <div className="space-y-3">
                 <div className="flex gap-2">
                   <input
-                    type="text"
-                    value={loginCode}
-                    onChange={(e) => setLoginCode(e.target.value)}
-                    placeholder="Verification code"
-                    maxLength={6}
-                    className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-center tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                    type="tel"
+                    value={loginPhone}
+                    onChange={(e) => setLoginPhone(e.target.value)}
+                    placeholder="手机号"
+                    maxLength={11}
+                    className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
-                    onClick={handleLogin}
-                    disabled={authLoading || !loginCode}
-                    className="px-6 py-2.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    onClick={handleSendCode}
+                    disabled={authLoading || countdown > 0}
+                    className="px-4 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                   >
-                    {authLoading ? "..." : "Login"}
+                    {countdown > 0 ? `${countdown}s` : "发送验证码"}
                   </button>
                 </div>
-              )}
-              <button
-                onClick={() => { setShowLogin(false); setCodeSent(false); setLoginPhone(""); setLoginCode(""); }}
-                className="text-xs text-slate-400 hover:text-slate-600"
-              >
-                Cancel
-              </button>
-            </div>
+                {codeSent && (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={loginCode}
+                      onChange={(e) => setLoginCode(e.target.value)}
+                      placeholder="验证码"
+                      maxLength={6}
+                      className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-center tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                    />
+                    <button
+                      onClick={handleLogin}
+                      disabled={authLoading || !loginCode}
+                      className="px-6 py-2.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    >
+                      {authLoading ? "..." : "登录"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Register */}
+            {authTab === "register" && (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={regUsername}
+                  onChange={(e) => setRegUsername(e.target.value)}
+                  placeholder="用户名（3-20个字符）"
+                  maxLength={20}
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="password"
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="密码（至少6个字符）"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="password"
+                  value={regConfirm}
+                  onChange={(e) => setRegConfirm(e.target.value)}
+                  placeholder="确认密码"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="tel"
+                    value={regPhone}
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    placeholder="手机号"
+                    maxLength={11}
+                    className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={handleRegSendCode}
+                    disabled={authLoading || regCountdown > 0}
+                    className="px-4 py-2.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    {regCountdown > 0 ? `${regCountdown}s` : "发送验证码"}
+                  </button>
+                </div>
+                {regCodeSent && (
+                  <input
+                    type="text"
+                    value={regCode}
+                    onChange={(e) => setRegCode(e.target.value)}
+                    placeholder="验证码"
+                    maxLength={6}
+                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-sm text-center tracking-widest font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onKeyDown={(e) => e.key === "Enter" && handleRegister()}
+                  />
+                )}
+                <button
+                  onClick={handleRegister}
+                  disabled={authLoading || !regUsername || !regPassword || !regConfirm || !regPhone || !regCode}
+                  className="w-full py-2.5 bg-emerald-600 text-white text-sm rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {authLoading ? "注册中..." : "注册"}
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => { setShowLogin(false); setCodeSent(false); setLoginPhone(""); setLoginCode(""); setError(null); }}
+              className="mt-3 text-xs text-slate-400 hover:text-slate-600"
+            >
+              取消
+            </button>
           </div>
         )}
 

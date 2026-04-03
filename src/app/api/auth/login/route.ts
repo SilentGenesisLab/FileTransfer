@@ -1,31 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { signToken } from "@/lib/auth";
-import { getStoredCode } from "@/lib/code-store";
+import bcrypt from "bcryptjs";
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, code } = await request.json();
+    const { username, password } = await request.json();
 
-    if (!phone || !code) {
-      return NextResponse.json({ error: "Phone and code are required" }, { status: 400 });
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: "用户名和密码不能为空" },
+        { status: 400 }
+      );
     }
 
-    const storedCode = getStoredCode(phone);
-    if (!storedCode || storedCode !== code) {
-      return NextResponse.json({ error: "Invalid or expired code" }, { status: 400 });
-    }
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
 
-    // Only allow registered users to login via SMS
-    let user = await prisma.user.findUnique({ where: { phone } });
     if (!user) {
       return NextResponse.json(
-        { error: "用户未注册，请先注册", needRegister: true },
+        { error: "用户不存在" },
         { status: 404 }
       );
     }
 
-    user = await prisma.user.update({
+    if (!user.password) {
+      return NextResponse.json(
+        { error: "该账号未设置密码，请使用手机验证码登录" },
+        { status: 400 }
+      );
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return NextResponse.json(
+        { error: "密码错误" },
+        { status: 401 }
+      );
+    }
+
+    await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
@@ -57,7 +72,10 @@ export async function POST(request: NextRequest) {
 
     return response;
   } catch (error) {
-    console.error("Verify error:", error);
-    return NextResponse.json({ error: "Verification failed" }, { status: 500 });
+    console.error("Login error:", error);
+    return NextResponse.json(
+      { error: "登录失败" },
+      { status: 500 }
+    );
   }
 }
