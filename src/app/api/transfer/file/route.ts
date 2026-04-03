@@ -12,11 +12,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
     const formData = await request.formData();
     const files = formData.getAll("files") as File[];
 
     if (!files.length) {
       return NextResponse.json({ error: "No files provided" }, { status: 400 });
+    }
+
+    for (const file of files) {
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: `File "${file.name}" exceeds 100MB limit (${(file.size / 1024 / 1024).toFixed(1)}MB)` },
+          { status: 413 },
+        );
+      }
     }
 
     const oss = getOSSClient();

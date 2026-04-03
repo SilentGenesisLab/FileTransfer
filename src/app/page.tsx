@@ -19,6 +19,8 @@ function formatSize(bytes: number) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("file");
   const [loading, setLoading] = useState(false);
@@ -27,6 +29,7 @@ export default function Home() {
 
   // File upload
   const [files, setFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Text
@@ -44,22 +47,52 @@ export default function Home() {
 
   const handleFileUpload = async () => {
     if (!files.length) return;
-    setLoading(true);
-    reset();
-    try {
-      const formData = new FormData();
-      files.forEach((f) => formData.append("files", f));
-      const res = await fetch("/api/transfer/file", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setResult(data.pickupCode);
-      setFiles([]);
-      if (fileRef.current) fileRef.current.value = "";
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setLoading(false);
+
+    const oversized = files.find((f) => f.size > MAX_FILE_SIZE);
+    if (oversized) {
+      setError(`File "${oversized.name}" exceeds 100MB limit (${(oversized.size / 1024 / 1024).toFixed(1)}MB)`);
+      return;
     }
+
+    setLoading(true);
+    setUploadProgress(0);
+    reset();
+
+    const formData = new FormData();
+    files.forEach((f) => formData.append("files", f));
+
+    const xhr = new XMLHttpRequest();
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        setUploadProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setResult(data.pickupCode);
+          setFiles([]);
+          if (fileRef.current) fileRef.current.value = "";
+        } else {
+          setError(data.error || "Upload failed");
+        }
+      } catch {
+        setError("Upload failed");
+      }
+      setLoading(false);
+      setUploadProgress(0);
+    };
+
+    xhr.onerror = () => {
+      setError("Network error during upload");
+      setLoading(false);
+      setUploadProgress(0);
+    };
+
+    xhr.open("POST", "/api/transfer/file");
+    xhr.send(formData);
   };
 
   const handleTextTransfer = async () => {
@@ -138,13 +171,23 @@ export default function Home() {
               >
                 <div className="text-4xl mb-2 text-slate-400">+</div>
                 <p className="text-slate-600 font-medium">Click to select files</p>
-                <p className="text-sm text-slate-400 mt-1">Support multiple files</p>
+                <p className="text-sm text-slate-400 mt-1">Support multiple files (max 100MB each)</p>
                 <input
                   ref={fileRef}
                   type="file"
                   multiple
                   className="hidden"
-                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.files || []);
+                    const oversized = selected.find((f) => f.size > MAX_FILE_SIZE);
+                    if (oversized) {
+                      setError(`File "${oversized.name}" exceeds 100MB limit (${(oversized.size / 1024 / 1024).toFixed(1)}MB)`);
+                      e.target.value = "";
+                      return;
+                    }
+                    setError(null);
+                    setFiles(selected);
+                  }}
                 />
               </div>
 
@@ -159,12 +202,27 @@ export default function Home() {
                 </div>
               )}
 
+              {loading && uploadProgress > 0 && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>Uploading...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <button
                 onClick={handleFileUpload}
                 disabled={!files.length || loading}
                 className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {loading ? "Uploading..." : "Upload & Get Code"}
+                {loading ? `Uploading${uploadProgress > 0 ? ` ${uploadProgress}%` : "..."}` : "Upload & Get Code"}
               </button>
             </div>
           )}
