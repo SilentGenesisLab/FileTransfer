@@ -16,22 +16,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid or expired code" }, { status: 400 });
     }
 
-    // Find or create user, update lastLoginAt
+    // Only allow registered users to login via SMS
     let user = await prisma.user.findUnique({ where: { phone } });
     if (!user) {
-      user = await prisma.user.create({
-        data: {
-          phone,
-          role: "USER",
-          lastLoginAt: new Date(),
-        },
-      });
-    } else {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
+      return NextResponse.json(
+        { error: "用户未注册，请先注册", needRegister: true },
+        { status: 404 }
+      );
     }
+
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
 
     const token = signToken({
       userId: user.id,
@@ -44,6 +41,7 @@ export async function POST(request: NextRequest) {
       user: {
         id: user.id,
         phone: user.phone,
+        username: user.username,
         role: user.role,
         nickname: user.nickname,
       },
